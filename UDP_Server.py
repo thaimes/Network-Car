@@ -10,7 +10,6 @@ sock.bind((UDP_IP, UDP_PORT))
 
 while True:
     data, addr = sock.recvfrom(1024)
-    #print("recieved message: %s" % data )
     
     if data == b'LEFT':
         print("TURNING LEFT")
