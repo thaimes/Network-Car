@@ -4,7 +4,6 @@ import socket
 import pygame
 import sys
 
-
 UDP_IP = "172.20.10.4" # IPv4 for Rpi 5
 UDP_PORT = 5005
 
@@ -16,7 +15,6 @@ print("UDP target port: %s" % UDP_PORT)
 pygame.init()
 
 display = pygame.display.set_mode((300, 300))
-
 
 while True:
     MESSAGE = None # Blank message to start with
