@@ -1,4 +1,5 @@
 # Controller test code to replace keyboard code
+
 import socket
 import pygame
 import sys
@@ -40,49 +41,38 @@ while True:
     rt_value = joystick.get_axis(5)
     ls_value = joystick.get_axis(0)
 
-    # Determine combined states
-    action = None
-    MESSAGE = None
+    # Initialize as blank
+    action = ""
+    MESSAGE = ""
 
     if rt_value > 0.5 and ls_value < -0.5:
-        action = "FORWARD AND LEFT"
-        MESSAGE = b"FLEFT"
+        action = "FLEFT"
     elif rt_value > 0.5 and ls_value > 0.5:
-        action = "FORWARD AND RIGHT"
-        MESSAGE = b"FRIGHT"
+        action = "FRIGHT"
     elif lt_value > 0.5 and ls_value < -0.5:
-        action = "BACKWARD AND LEFT"
-        MESSAGE = b"BLEFT"
+        action = "BLEFT"
     elif lt_value > 0.5 and ls_value > 0.5:
-        action = "BACKWARD AND RIGHT"
-        MESSAGE = b"BRIGHT"
+        action = "BRIGHT"
     elif rt_value > 0.5:
-        action = "FORWARD"
-        MESSAGE = b"FORWARD"        
+        action = "FORWARD"       
     elif lt_value > 0.5:
         action = "BACK"
-        MESSAGE = b"BACK"
     elif ls_value < -0.5:
         action = "LEFT"
-        MESSAGE = b"LEFT"
     elif ls_value > 0.5:
         action = "RIGHT"
-        MESSAGE = b"RIGHT"
     else:
         action = "HALT"
-        MESSAGE = b""
 
     if last_action != action:
         print(action)
         last_action = action
+        if action:
+            MESSAGE = action.encode()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(MESSAGE, (UDP_IP, UDP_PORT))
 
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.sendto(MESSAGE, (UDP_IP, UDP_PORT))
-
-
-
-# Controller mapping (PS5 controller being used, update to XBOX controller at lab)
+# Controller mapping
 # LT = Axis 4
 # RT = Axis 5
 # LS = Axis 0
