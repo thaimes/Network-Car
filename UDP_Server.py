@@ -67,29 +67,30 @@ def execute(command):
         steering.angle = angles[1] 
         print("GOING FORWARD")
     
-    elif command == b'FORWARD AND LEFT':
+    elif command == b'FLEFT':
         motor.forward()
         steering.angle = angles[0]
         print("GOING FORWARD AND TURNING LEFT")
     
-    elif command == b'FORWARD AND RIGHT':
+    elif command == b'FRIGHT':
         motor.forward()
         steering.angle = angles[2]
         print("GOING FORWARD AND TURNING RIGHT")
     
-    elif command == b'BACKING AND RIGHT':
+    elif command == b'BRIGHT':
         motor.backward()
         steering.angle = angles[0]
         print("BACKING UP AND TURNING RIGHT")
     
-    elif command == b'BACKING AND LEFT':
+    elif command == b'BLEFT':
         motor.backward()
         steering.angle = angles[2]
         print("BACKING UP AND TURNING LEFT")
         
-    else:
+    elif command == b'HALT':
         motor.stop()
         steering.angle = angles[1]
+        print("CAR STOPPED")
         
 
 while True:
