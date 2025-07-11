@@ -8,7 +8,9 @@ import threading
 import socket
 import time
 from time import sleep
-from gpiozero import Motor, AngularServo
+from signal import pause
+from gpiozero import Motor, AngularServo, LED, Button, TonalBuzzer
+from gpiozero.tones import Tone
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
 from picamera2.outputs import PyavOutput
@@ -16,10 +18,13 @@ from picamera2.outputs import PyavOutput
 # UDP Server Setup
     
 UDP_IP = "0.0.0.0" # IPv4 address for PC
-UDP_PORT = 5005
+sock_control = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock_control.bind((UDP_IP, 5005))
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind((UDP_IP, UDP_PORT))
+sock_honker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock_honker.bind((UDP_IP, 5006))
+
+
 ################################################################3
 # Camera Streaming Setup
 picam2 = Picamera2()
@@ -31,11 +36,108 @@ picam2.configure(config)
 encoder = H264Encoder(bitrate=1000000)
 output = PyavOutput("rtsp://172.20.10.3:8554/cam", format="rtsp")
 
+#######################################################################
+# Buzzer setup
+led=LED(6)
+pow_button=Button(23)
+led.off()
+
+buzzer=TonalBuzzer(27)
+led_index=0
+
 # Shared stop-event for clean exit
 stop_event = threading.Event()
 
+def honker():
+    
+    NOTE_E5= 659.25
+    NOTE_B4 = 493.88
+    NOTE_C5 = 523.25
+    NOTE_D5 = 587.33
+    NOTE_A4=440.00
+    NOTE_G4=392.00
+    NOTE_F5=698.46
+    NOTE_A5=880.00
+    NOTE_G5=783.99
+        
+    melody=[
+        NOTE_E5, NOTE_B4, NOTE_C5, NOTE_D5,
+        NOTE_C5, NOTE_B4, NOTE_A4, NOTE_A4,
+        NOTE_C5, NOTE_E5, NOTE_D5, NOTE_C5,
+        NOTE_B4, NOTE_C5, NOTE_D5, NOTE_E5,
+        NOTE_C5, NOTE_A4, NOTE_A4  ]
+        
+    durations= [4, 8, 8, 4, 8, 8, 4, 8, 8, 4, 8, 8, 4, 8, 8, 4, 8, 8, 4, 8]
+    
+    #if power_button pressed
+    def switch_led():
+        global led_index
+        if led_index==1: 
+            led.off()
+            led_index=0
+            
+        elif led_index==0:
+        #Power Startup = Lights and Sound
+            led.on()
+            buzzer.play(808.61)
+            sleep(0.25)
+            led.off()
+            buzzer.play(622.25)
+            sleep(0.3)
+            led.on()
+            buzzer.play(415.30)
+            sleep(0.3)
+            led.off()
+            buzzer.play(466.16)
+            sleep(0.6)
+            led.on()
+            buzzer.stop()
+            led_index=1
+            
+
+    def buzzer_off():
+        buzzer.stop()
+        
+
+    pow_button.when_pressed=switch_led
+
+    while not stop_event.is_set():
+        #led_index == 1:
+        data, addr = sock_honker.recvfrom(1024)
+        
+        print(data)
+        
+        if data == b'B':
+            print("HONK")
+            buzzer.play(440)
+
+        elif data==b'Tetris':
+            for i in range(len(melody)):
+                duration_ms=1000/durations[i]
+                
+                buzzer.play(melody[i])
+                sleep(duration_ms/1000)
+                buzzer.stop()
+
+        elif data==b'Bumper':
+            led.on()
+            sleep(0.25)
+            led.off()
+            sleep(0.25)
+        
+        elif data==b'BLight':
+            led.on()
+            buzzer.play(440)
+            sleep(0.25)
+            led.off()
+            buzzer.stop()
+
+        else:
+            led.on()
+            buzzer.stop()
+            
 def control():
-    motor = Motor(forward = 4, backward = 24)
+    motor = Motor(forward = 17, backward = 24, enable = 18, pwm = True)
     st_servo = 25
     steering = AngularServo(
         st_servo,
@@ -56,16 +158,16 @@ def control():
         sleep(0.5)
         
     while not stop_event.is_set():
-        data, addr = sock.recvfrom(1024)
+        data, addr = sock_control.recvfrom(1024)
         
         if data == b'LEFT':
             motor.stop()
-            steering.angle = angles[2]
+            steering.angle = angles[0]
             print("TURNING LEFT")
             
         elif data == b'RIGHT':
             motor.stop()
-            steering.angle = angles[0]
+            steering.angle = angles[2]
             print("TURNING RIGHT")
             
         elif data == b'BACK':
@@ -80,22 +182,22 @@ def control():
         
         elif data == b'FORWARD AND LEFT':
             motor.forward()
-            steering.angle = angles[2]
+            steering.angle = angles[0]
             print("GOING FORWARD AND TURNING LEFT")
         
         elif data == b'FORWARD AND RIGHT':
             motor.forward()
-            steering.angle = angles[0]
+            steering.angle = angles[2]
             print("GOING FORWARD AND TURNING RIGHT")
         
         elif data == b'BACKING AND RIGHT':
             motor.backward()
-            steering.angle = angles[2]
+            steering.angle = angles[0]
             print("BACKING UP AND TURNING RIGHT")
         
         elif data == b'BACKING AND LEFT':
             motor.backward()
-            steering.angle = angles[0]
+            steering.angle = angles[2]
             print("BACKING UP AND TURNING LEFT")
             
         else:
@@ -113,7 +215,8 @@ def camera():
 if __name__ == "__main__":
     print("Starting threads...")
     t1 = threading.Thread(target=control)
-    t2 = threading.Thread(target=camera)
+    t2 = threading.Thread(target=honker)
+    #t2 = threading.Thread(target=camera)
 
     t1.start()
     t2.start()
@@ -128,4 +231,3 @@ if __name__ == "__main__":
     t1.join()
     t2.join()
     print("All tasks completed.")
-
