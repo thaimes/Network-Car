@@ -7,13 +7,15 @@
 import threading
 import socket
 import time
+import cv2
+import io
+import numpy as np
 from time import sleep
 from signal import pause
 from gpiozero import Motor, AngularServo, LED, Button, TonalBuzzer
 from gpiozero.tones import Tone
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-from picamera2.outputs import PyavOutput
+from flask import Flask, Response
 
 # UDP Server Setup
     
@@ -27,14 +29,12 @@ sock_honker.bind((UDP_IP, 5006))
 
 ################################################################3
 # Camera Streaming Setup
+app = Flask(__name__)
+
+# Initialize camera once
 picam2 = Picamera2()
-config = picam2.create_video_configuration(
-    main={'size': (1280, 720), 'format': 'YUV420'},
-    controls={'FrameRate': 30}
-)
-picam2.configure(config)
-encoder = H264Encoder(bitrate=1000000)
-output = PyavOutput("rtsp://172.20.10.3:8554/cam", format="rtsp")
+picam2.configure(picam2.create_video_configuration(main={"size": (1100, 800)}))
+picam2.start()
 
 #######################################################################
 # Buzzer setup
@@ -204,11 +204,24 @@ def control():
             motor.stop()
             steering.angle = angles[1] 
 
-def camera():
-    picam2.start_recording(encoder, output)
-    while not stop_event.is_set():
-        time.sleep(0.5)
-    picam2.stop_recording()
+def camdamn():
+    def generate_frames():
+        while True:
+            frame = picam2.capture_array()
+            ret, buffer = cv2.imencode('.jpg', frame)
+            if not ret:
+                continue
+            frame_bytes = buffer.tobytes()
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+    @app.route('/video_feed')
+    def video_feed():
+        return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+    if __name__ == '__main__':
+        app.run(host="0.0.0.0", port=5000, threaded=True)
 
 ####################################################
 # Main
@@ -216,13 +229,14 @@ if __name__ == "__main__":
     print("Starting threads...")
     t1 = threading.Thread(target=control)
     t2 = threading.Thread(target=honker)
-    #t2 = threading.Thread(target=camera)
+    t3 = threading.Thread(target=camdamn)
 
     t1.start()
     t2.start()
+    t3.start()
 
     try:
-        while t1.is_alive() and t2.is_alive():
+        while t1.is_alive() and t2.is_alive() and t3.is_alive:
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("Shutdown requested, stopping threads...")
@@ -230,4 +244,5 @@ if __name__ == "__main__":
 
     t1.join()
     t2.join()
+    t3.join()
     print("All tasks completed.")
