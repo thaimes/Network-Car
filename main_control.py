@@ -1,9 +1,14 @@
 # Main code for controlling RC car
 
+import numpy as np
+import threading
+import requests
 import socket
 import pygame
 import time
 import sys
+import cv2
+
 
 UDP_IP = "172.20.10.7" # IPv4 for Rpi 5
 UDP_PORT1 = 5005
@@ -99,8 +104,34 @@ def handle_buzzer(event):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(MESSAGE, (UDP_IP, UDP_PORT2))
 
+def camrunner(screen):
+    STREAM_URL = 'http://172.20.10.7:5000/video_feed'
+    stream = requests.get(STREAM_URL, stream=True)
+    bytes_buffer = b''
+    for chunk in stream.iter_content(chunk_size=1024):
+        bytes_buffer += chunk
+        a = bytes_buffer.find(b'\xff\xd8')  # JPEG start
+        b = bytes_buffer.find(b'\xff\xd9')  # JPEG end
+        if a != -1 and b != -1:
+            jpg = bytes_buffer[a:b+2]
+            bytes_buffer = bytes_buffer[b+2:]
+            img_np = np.frombuffer(jpg, dtype=np.uint8)
+            frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+            if frame is not None:
+                frame_surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
+                screen.blit(frame_surface, (0, 0))
+                pygame.display.update()
+
 if __name__ == "__main__":
     print("Starting main loop...")
+    # Set up a larger display for video + control
+    screen = pygame.display.set_mode((1100, 800))
+    pygame.display.set_caption("RC Car Game")
+
+    # Start camera thread
+    cam_thread = threading.Thread(target=camrunner, args=(screen,), daemon=True)
+    cam_thread.start()
+
     try:
         while True:
             for event in pygame.event.get():
