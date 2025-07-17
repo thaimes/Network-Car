@@ -12,7 +12,7 @@ import io
 import numpy as np
 from time import sleep
 from signal import pause
-from gpiozero import Motor, AngularServo, LED, Button, TonalBuzzer
+from gpiozero import Motor, AngularServo, LED, Button, TonalBuzzer, DigitalInputDevice
 from gpiozero.tones import Tone
 from picamera2 import Picamera2
 from flask import Flask, Response
@@ -47,6 +47,7 @@ led_index=0
 
 # Shared stop-event for clean exit
 stop_event = threading.Event()
+OC_event = threading.Event()
 
 def honker():
     
@@ -102,42 +103,44 @@ def honker():
     pow_button.when_pressed=switch_led
 
     while not stop_event.is_set():
-        #led_index == 1:
         data, addr = sock_honker.recvfrom(1024)
-        
         print(data)
         
-        if data == b'B':
-            print("HONK")
-            buzzer.play(440)
+        if led_index==1:
+            if data == b'B':
+                print("HONK")
+                buzzer.play(440)
 
-        elif data==b'Tetris':
-            for i in range(len(melody)):
-                duration_ms=1000/durations[i]
+            elif data==b'Tetris':
+                for i in range(len(melody)):
+                    duration_ms=1000/durations[i]
                 
-                buzzer.play(melody[i])
-                sleep(duration_ms/1000)
+                    buzzer.play(melody[i])
+                    sleep(duration_ms/1000)
+                    buzzer.stop()
+
+            elif data==b'Bumper':
+                led.on()
+                sleep(0.25)
+                led.off()
+                sleep(0.25)
+        
+            elif data==b'BLight':
+                led.on()
+                buzzer.play(440)
+                sleep(0.25)
+                led.off()
                 buzzer.stop()
 
-        elif data==b'Bumper':
-            led.on()
-            sleep(0.25)
-            led.off()
-            sleep(0.25)
-        
-        elif data==b'BLight':
-            led.on()
-            buzzer.play(440)
-            sleep(0.25)
-            led.off()
-            buzzer.stop()
-
+            else:
+                led.on()
+                buzzer.stop()
         else:
-            led.on()
+            led.off()
             buzzer.stop()
             
 def control():
-    motor = Motor(forward = 17, backward = 24, enable = 18, pwm = True)
+    motor = Motor(forward = 24, backward = 17, enable = 18, pwm = True)
     st_servo = 25
     steering = AngularServo(
         st_servo,
@@ -149,7 +152,7 @@ def control():
     steering.angle = 90
     steering.detach()
     angles = [30,90,150]
-
+    
     def turn(angle):
         steering.detach()
         steering.angle = angle
@@ -159,50 +162,66 @@ def control():
         
     while not stop_event.is_set():
         data, addr = sock_control.recvfrom(1024)
+
         
-        if data == b'LEFT':
-            motor.stop()
-            steering.angle = angles[0]
-            print("TURNING LEFT")
+        if led_index==1:
+            if OC_event.is_set():
+                motor.stop()
+                steering.angle = angles[1]
+                print("OC")
+                
+            elif data == b'LEFT':
+                motor.stop()
+                steering.angle = angles[0]
+                print("TURNING LEFT")
             
-        elif data == b'RIGHT':
-            motor.stop()
-            steering.angle = angles[2]
-            print("TURNING RIGHT")
+            elif data == b'RIGHT':
+                motor.stop()
+                steering.angle = angles[2]
+                print("TURNING RIGHT")
             
-        elif data == b'BACK':
-            motor.backward()
-            steering.angle = angles[1] 
-            print("BACKING UP")
+            elif data == b'BACK':
+                motor.backward(speed=0.85)
+                steering.angle = angles[1] 
+                print("BACKING UP")
             
-        elif data == b'FORWARD':
-            motor.forward()
-            steering.angle = angles[1] 
-            print("GOING FORWARD")
+            elif data == b'FORWARD':
+                motor.forward(speed=0.85)
+                steering.angle = angles[1] 
+                print("GOING FORWARD")
         
-        elif data == b'FORWARD AND LEFT':
-            motor.forward()
-            steering.angle = angles[0]
-            print("GOING FORWARD AND TURNING LEFT")
+            elif data == b'FLEFT':
+                motor.forward(speed=0.85)
+                steering.angle = angles[0]
+                print("GOING FORWARD AND TURNING LEFT")
         
-        elif data == b'FORWARD AND RIGHT':
-            motor.forward()
-            steering.angle = angles[2]
-            print("GOING FORWARD AND TURNING RIGHT")
+            elif data == b'FRIGHT':
+                motor.forward(speed=0.85)
+                steering.angle = angles[2]
+                print("GOING FORWARD AND TURNING RIGHT")
         
-        elif data == b'BACKING AND RIGHT':
-            motor.backward()
-            steering.angle = angles[0]
-            print("BACKING UP AND TURNING RIGHT")
+            elif data == b'BRIGHT':
+                motor.backward(speed=0.85)
+                steering.angle = angles[0]
+                print("BACKING UP AND TURNING RIGHT")
         
-        elif data == b'BACKING AND LEFT':
-            motor.backward()
-            steering.angle = angles[2]
-            print("BACKING UP AND TURNING LEFT")
+            elif data == b'BLEFT':
+                motor.backward(speed=0.85)
+                steering.angle = angles[2]
+                print("BACKING UP AND TURNING LEFT")
             
+            elif data == b'A':
+                motor.forward()
+                steering.angle = angles[1] 
+                print("TURBO")
+            
+            else:
+                motor.stop()
+                steering.angle = angles[1]
+                     
         else:
-            motor.stop()
-            steering.angle = angles[1] 
+                motor.stop()
+                steering.angle = angles[1] 
 
 def camdamn():
     def generate_frames():
@@ -224,19 +243,40 @@ def camdamn():
         app.run(host="0.0.0.0", port=5000, threaded=True)
 
 ####################################################
+
+def overcurrent():
+    overcurrent_pin = DigitalInputDevice(26)
+    debounce_time = 0.5  # Seconds the pin must stay safe before clearing
+
+    def monitor():
+        while not stop_event.is_set():
+            if overcurrent_pin.value == 1:
+                time.sleep(0.5)
+                if overcurrent_pin.value == 1:
+                    OC_event.is_set()
+                else:
+                    OC_event.clear()
+            else:
+                OC_event.clear()
+    threading.Thread(target=monitor, daemon=True).start()
+    pause()  # Keep GPIO thread alive
+
+
 # Main
 if __name__ == "__main__":
     print("Starting threads...")
     t1 = threading.Thread(target=control)
     t2 = threading.Thread(target=honker)
     t3 = threading.Thread(target=camdamn)
+    t4 = threading.Thread(target=overcurrent)
 
     t1.start()
     t2.start()
     t3.start()
+    t4.start()
 
     try:
-        while t1.is_alive() and t2.is_alive() and t3.is_alive:
+        while t1.is_alive() and t2.is_alive() and t3.is_alive and t4.is_alive:
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("Shutdown requested, stopping threads...")
@@ -245,4 +285,6 @@ if __name__ == "__main__":
     t1.join()
     t2.join()
     t3.join()
+    t4.join()
     print("All tasks completed.")
+    
