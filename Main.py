@@ -12,7 +12,7 @@ import io
 import numpy as np
 from time import sleep
 from signal import pause
-from gpiozero import Motor, AngularServo, LED, Button, TonalBuzzer, DigitalInputDevice
+from gpiozero import Motor, AngularServo, LED, Button, TonalBuzzer, DigitalInputDevice, Servo
 from gpiozero.tones import Tone
 from picamera2 import Picamera2
 from flask import Flask, Response
@@ -33,8 +33,11 @@ app = Flask(__name__)
 
 # Initialize camera once
 picam2 = Picamera2()
-picam2.configure(picam2.create_video_configuration(main={"size": (1100, 800)}))
+picam2.configure(picam2.create_video_configuration(
+    main={"size": (850, 550)}))
+
 picam2.start()
+
 
 #######################################################################
 # Buzzer setup
@@ -43,8 +46,8 @@ pow_button=Button(23)
 led.off()
 
 buzzer=TonalBuzzer(27)
-led_index=0
-
+led_index=0 
+       
 # Shared stop-event for clean exit
 stop_event = threading.Event()
 OC_event = threading.Event()
@@ -140,94 +143,95 @@ def honker():
             buzzer.stop()
             
 def control():
-    motor = Motor(forward = 24, backward = 17, enable = 18, pwm = True)
+    global motor
+    motor = Motor(forward=24, backward=17, enable=18, pwm=True)
     st_servo = 25
     steering = AngularServo(
         st_servo,
-        min_angle = 0,
-        max_angle = 180,
-        min_pulse_width = 0.5/1000,
-        max_pulse_width = 2.5/1000
+        min_angle=0,
+        max_angle=180,
+        min_pulse_width=0.6 / 1000,
+        max_pulse_width=2.4 / 1000
     )
-    steering.angle = 90
-    steering.detach()
-    angles = [30,90,150]
     
+    # Store last angle to avoid re-setting same value
+    last_angle = None
+    angles = [30, 90, 150]
+
     def turn(angle):
-        steering.detach()
-        steering.angle = angle
-        sleep(.2)           # wait so servo has time to move
-        steering.detach()
-        sleep(0.5)
-        
+        nonlocal last_angle
+        if angle != last_angle:
+            steering.angle = angle
+            sleep(0.3)      # Give it time to move
+            steering.detach()
+            last_angle = angle
+
+    turn(angles[1])  # Start centered
+
     while not stop_event.is_set():
         data, addr = sock_control.recvfrom(1024)
 
-        
-        if led_index==1:
-            if OC_event.is_set():
+        if led_index == 1:
+            if data == b'LEFT':
                 motor.stop()
-                steering.angle = angles[1]
-                print("OC")
-                
-            elif data == b'LEFT':
-                motor.stop()
-                steering.angle = angles[0]
+                turn(angles[0])
                 print("TURNING LEFT")
-            
+
             elif data == b'RIGHT':
                 motor.stop()
-                steering.angle = angles[2]
+                turn(angles[2])
                 print("TURNING RIGHT")
-            
+
             elif data == b'BACK':
                 motor.backward(speed=0.85)
-                steering.angle = angles[1] 
+                turn(angles[1])
                 print("BACKING UP")
-            
+
             elif data == b'FORWARD':
                 motor.forward(speed=0.85)
-                steering.angle = angles[1] 
+                turn(angles[1])
                 print("GOING FORWARD")
-        
+
             elif data == b'FLEFT':
                 motor.forward(speed=0.85)
-                steering.angle = angles[0]
+                turn(angles[0])
                 print("GOING FORWARD AND TURNING LEFT")
-        
+
             elif data == b'FRIGHT':
                 motor.forward(speed=0.85)
-                steering.angle = angles[2]
+                turn(angles[2])
                 print("GOING FORWARD AND TURNING RIGHT")
-        
+
             elif data == b'BRIGHT':
                 motor.backward(speed=0.85)
-                steering.angle = angles[0]
+                turn(angles[0])
                 print("BACKING UP AND TURNING RIGHT")
-        
+
             elif data == b'BLEFT':
                 motor.backward(speed=0.85)
-                steering.angle = angles[2]
+                turn(angles[2])
                 print("BACKING UP AND TURNING LEFT")
-            
+
             elif data == b'A':
                 motor.forward()
-                steering.angle = angles[1] 
+                turn(angles[1])
                 print("TURBO")
-            
+
             else:
                 motor.stop()
-                steering.angle = angles[1]
-                     
+                turn(angles[1])
+
         else:
-                motor.stop()
-                steering.angle = angles[1] 
+            motor.stop()
+            turn(angles[1])
+ 
 
 def camdamn():
     def generate_frames():
         while True:
             frame = picam2.capture_array()
-            ret, buffer = cv2.imencode('.jpg', frame)
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
+
             if not ret:
                 continue
             frame_bytes = buffer.tobytes()
@@ -254,6 +258,8 @@ def overcurrent():
                 time.sleep(0.5)
                 if overcurrent_pin.value == 1:
                     OC_event.is_set()
+                    print("OC")
+                    motor.stop()
                 else:
                     OC_event.clear()
             else:
@@ -288,3 +294,4 @@ if __name__ == "__main__":
     t4.join()
     print("All tasks completed.")
     
+
