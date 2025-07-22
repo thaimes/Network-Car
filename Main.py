@@ -38,8 +38,6 @@ picam2.configure(picam2.create_video_configuration(
     main={"size": (850, 550)}))
 
 picam2.start()
-
-
 #######################################################################
 # Buzzer setup
 led=LED(6)
@@ -102,7 +100,6 @@ def honker():
     def buzzer_off():
         buzzer.stop()
         
-
     pow_button.when_pressed=switch_led
 
     while not stop_event.is_set():
@@ -224,7 +221,6 @@ def control():
         else:
             motor.stop()
             turn(angles[1])
- 
 
 def camdamn():
     def generate_frames():
@@ -245,14 +241,11 @@ def camdamn():
 
     if __name__ == '__main__':
         app.run(host="0.0.0.0", port=5000, threaded=True)
-
 ####################################################
-
 def overcurrent():
     overcurrent_pin = DigitalInputDevice(26)
     OC_event = None
 
-    #def monitor():
     while not stop_event.is_set():
         if overcurrent_pin.value == 1:
             time.sleep(0.5)
@@ -266,11 +259,6 @@ def overcurrent():
         if OC_event is not None:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.sendto(OC_event, (UDP_OC, UDP_PORT))
-                
-                
-    #threading.Thread(target=monitor, daemon=True).start()
-    #pause()  # Keep GPIO thread alive
-
 
 # Main
 if __name__ == "__main__":
@@ -297,4 +285,3 @@ if __name__ == "__main__":
     t3.join()
     t4.join()
     print("All tasks completed.")
-    
