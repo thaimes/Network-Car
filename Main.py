@@ -26,7 +26,8 @@ sock_control.bind((UDP_IP, 5005))
 sock_honker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock_honker.bind((UDP_IP, 5006))
 
-
+UDP_OC = "172.20.10.3"
+UDP_PORT = 5007
 ################################################################3
 # Camera Streaming Setup
 app = Flask(__name__)
@@ -50,7 +51,6 @@ led_index=0
        
 # Shared stop-event for clean exit
 stop_event = threading.Event()
-OC_event = threading.Event()
 
 def honker():
     
@@ -241,7 +241,7 @@ def camdamn():
 
     @app.route('/video_feed')
     def video_feed():
-        return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+        return Response (generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
     if __name__ == '__main__':
         app.run(host="0.0.0.0", port=5000, threaded=True)
@@ -250,22 +250,26 @@ def camdamn():
 
 def overcurrent():
     overcurrent_pin = DigitalInputDevice(26)
-    debounce_time = 0.5  # Seconds the pin must stay safe before clearing
+    OC_event = None
 
-    def monitor():
-        while not stop_event.is_set():
+    #def monitor():
+    while not stop_event.is_set():
+        if overcurrent_pin.value == 1:
+            time.sleep(0.5)
             if overcurrent_pin.value == 1:
-                time.sleep(0.5)
-                if overcurrent_pin.value == 1:
-                    OC_event.is_set()
-                    print("OC")
-                    motor.stop()
-                else:
-                    OC_event.clear()
+                print("OC")
+                motor.stop()
+                OC_event =  b"OC"
             else:
-                OC_event.clear()
-    threading.Thread(target=monitor, daemon=True).start()
-    pause()  # Keep GPIO thread alive
+                OC_event = None
+        
+        if OC_event is not None:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(OC_event, (UDP_OC, UDP_PORT))
+                
+                
+    #threading.Thread(target=monitor, daemon=True).start()
+    #pause()  # Keep GPIO thread alive
 
 
 # Main
@@ -294,4 +298,3 @@ if __name__ == "__main__":
     t4.join()
     print("All tasks completed.")
     
-
