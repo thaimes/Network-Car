@@ -1,5 +1,6 @@
 # Main code for controlling RC car
 
+import cv2.aruco as aruco
 import numpy as np
 import threading
 import requests
@@ -20,9 +21,6 @@ print("UDP target port: %s" % UDP_PORT2)
 
 pygame.init()
 pygame.joystick.init()
-
-display = pygame.display.set_mode((300, 300))
-pygame.display.set_caption("Controller Input Test")
 
 if pygame.joystick.get_count() == 0:
     print("No joystick found. Please connect a joystick.")
@@ -71,10 +69,11 @@ def handle_control():
 
 def handle_buzzer(event):
     MESSAGE = None
+    TURBO = None
     if event.type == pygame.JOYBUTTONDOWN:
         if j.get_button(0):
             print("A")
-            MESSAGE = b"A"
+            TURBO = b"A"
         if j.get_button(1):
             print("B")
             MESSAGE = b"B"
@@ -99,38 +98,131 @@ def handle_buzzer(event):
     if event.type == pygame.JOYBUTTONUP:
         print("STOP")
         MESSAGE = b"STOP"
+        TURBO = b"STOP"
 
     if MESSAGE is not None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(MESSAGE, (UDP_IP, UDP_PORT2))
 
+    if TURBO is not None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(TURBO, (UDP_IP, UDP_PORT1))
+
 def camrunner(screen):
+    # Game Setup
+    START_TIME = 3 * 60
+    time_remaining = START_TIME
+    last_coin_time = 0
+    current_lap = 0
+    final_reached = False
+    start_time = time.time()
+
+    # ArUco Setup
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    parameters = aruco.DetectorParameters()
+    detector = aruco.ArucoDetector(aruco_dict, parameters)
+
+    # Stream Setup
     STREAM_URL = 'http://172.20.10.7:5000/video_feed'
     stream = requests.get(STREAM_URL, stream=True)
     bytes_buffer = b''
-    for chunk in stream.iter_content(chunk_size=1024):
-        bytes_buffer += chunk
-        a = bytes_buffer.find(b'\xff\xd8')  # JPEG start
-        b = bytes_buffer.find(b'\xff\xd9')  # JPEG end
-        if a != -1 and b != -1:
-            jpg = bytes_buffer[a:b+2]
-            bytes_buffer = bytes_buffer[b+2:]
-            img_np = np.frombuffer(jpg, dtype=np.uint8)
-            frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-            if frame is not None:
-                frame_surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
+    running = True
+    print("Game started! Time: 3:00")
+
+    try:
+        for chunk in stream.iter_content(chunk_size=1024):
+            if not running or final_reached:
+                break
+
+            # Process Pygame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+
+            # Accumulate stream bytes
+            bytes_buffer += chunk
+            a = bytes_buffer.find(b'\xff\xd8')
+            b = bytes_buffer.find(b'\xff\xd9')
+
+            if a != -1 and b != -1:
+                jpg = bytes_buffer[a:b+2]
+                bytes_buffer = bytes_buffer[b+2:]
+
+                img_np = np.frombuffer(jpg, dtype=np.uint8)
+                frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+                if frame is None:
+                    continue
+
+                # Game Logic
+                elapsed = time.time() - start_time
+                time_remaining = START_TIME - int(elapsed)
+
+                if time_remaining <= 0:
+                    print("Time's up!")
+                    running = False
+
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                corners, ids, _ = detector.detectMarkers(gray)
+
+                if ids is not None:
+                    for marker_id in ids.flatten():
+                        if marker_id == 0 and current_lap < 1:
+                            current_lap = 1
+                            print("Lap 1 reached!")
+                        elif marker_id == 1 and current_lap < 2:
+                            current_lap = 2
+                            print("Lap 2 reached!")
+                        elif marker_id == 2 and current_lap == 2:
+                            print("Final reached! Game complete!")
+                            final_reached = True
+                            break
+                        elif marker_id == 3:
+                            now = time.time()
+                            if now - last_coin_time > 3:
+                                time_remaining += 15
+                                start_time += 15
+                                last_coin_time = now
+                                print("Coin collected! +15s")
+
+                # Marker frames
+                aruco.drawDetectedMarkers(frame, corners, ids)
+
+                # Overlay timer and lap
+                mins = time_remaining // 60
+                secs = time_remaining % 60
+                status = f"⏱ {int(mins):02d}:{int(secs):02d} | Lap: {current_lap}"
+                cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+                # Create surface and display
+                frame_surface = pygame.surfarray.make_surface(frame.swapaxes(0,1))
                 screen.blit(frame_surface, (0, 0))
                 pygame.display.update()
+    finally:
+        pygame.quit()
 
+def overcurrent():
+    UDP_PORT_OC = 5007
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", UDP_PORT_OC))
+    print(f"Overcurrent detection listening on UDP port {UDP_PORT_OC}")
+    while True:
+        data, addr = sock.recvfrom(1024)
+        if data.strip() == b"OC":
+            print("OVERCURRENT")
+    
 if __name__ == "__main__":
     print("Starting main loop...")
     # Set up a larger display for video + control
-    screen = pygame.display.set_mode((1100, 800))
+    screen = pygame.display.set_mode((850, 550))
     pygame.display.set_caption("RC Car Game")
 
     # Start camera thread
     cam_thread = threading.Thread(target=camrunner, args=(screen,), daemon=True)
     cam_thread.start()
+
+    # Start overcurrent detection thread
+    oc_thread = threading.Thread(target=overcurrent, daemon=True)
+    oc_thread.start()
 
     try:
         while True:
