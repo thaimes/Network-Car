@@ -1,4 +1,5 @@
-# Main code for controlling RC car with controller-selectable game modes
+# Main code for controlling RC car
+# All controls are mapped for an XBox One controller, adjustments must be made if changed
 
 import cv2.aruco as aruco
 import numpy as np
@@ -11,13 +12,16 @@ import time
 import sys
 import cv2
 
-UDP_IP = "172.20.10.7"
-UDP_PORT1 = 5005
-UDP_PORT2 = 5006
+
+UDP_IP = "172.20.10.7" # IPv4 for Rpi 5
+UDP_PORT1 = 5005 # Port control
+UDP_PORT2 = 5006 # Port miscellaneous
+UDP_PORT3 = 5008 # Port power
 
 print("UDP target IP: %s" % UDP_IP)
 print("UDP target port: %s" % UDP_PORT1)
 print("UDP target port: %s" % UDP_PORT2)
+print("UDP target port: %s" % UDP_PORT3)
 
 pygame.init()
 pygame.joystick.init()
@@ -32,6 +36,92 @@ j.init()
 print("Joystick name:", j.get_name())
 
 last_action = None  # Track last printed action
+
+def power():
+    MESSAGE = None
+    if event.type == pygame.JOYBUTTONDOWN:
+        if j.get_button(7):
+            print("Power ON")
+            MESSAGE = b"ON"
+
+    if MESSAGE is not None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(MESSAGE, (UDP_IP, UDP_PORT3))
+
+def handle_control():
+    global last_action
+    lt_value = j.get_axis(4)
+    rt_value = j.get_axis(5)
+    ls_value = j.get_axis(0)
+
+    action = ""
+    if rt_value > 0.5 and ls_value < -0.5:
+        action = "FLEFT"
+    elif rt_value > 0.5 and ls_value > 0.5:
+        action = "FRIGHT"
+    elif lt_value > 0.5 and ls_value < -0.5:
+        action = "BLEFT"
+    elif lt_value > 0.5 and ls_value > 0.5:
+        action = "BRIGHT"
+    elif rt_value > 0.5:
+        action = "FORWARD"
+    elif lt_value > 0.5:
+        action = "BACK"
+    elif ls_value < -0.5:
+        action = "LEFT"
+    elif ls_value > 0.5:
+        action = "RIGHT"
+    else:
+        action = "HALT"
+
+    if last_action != action:
+        print(action)
+        last_action = action
+        if action:
+            MESSAGE = action.encode()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(MESSAGE, (UDP_IP, UDP_PORT1))
+
+def handle_buzzer(event):
+    MESSAGE = None
+    TURBO = None
+    if event.type == pygame.JOYBUTTONDOWN:
+        if j.get_button(0):
+            print("A")
+            TURBO = b"A"
+        if j.get_button(1):
+            print("B")
+            MESSAGE = b"B"
+        if j.get_button(2):
+            print("X")
+            MESSAGE = b"X"
+        if j.get_button(3):
+            print("Y")
+            MESSAGE = b"Tetris"
+        if j.get_button(4):
+            print("Bumper")
+            MESSAGE = b"Bumper"
+        if j.get_button(5):
+            print("Bumper")
+            MESSAGE = b"Bumper"
+        if (j.get_button(4) or j.get_button(5)) and j.get_button(1):
+            print("Blink")
+            MESSAGE = b"BLight"
+        if j.get_button(8):
+            print("Tetris")
+            MESSAGE = b"Tetris"
+    if event.type == pygame.JOYBUTTONUP:
+        print("STOP")
+        MESSAGE = b"STOP"
+        TURBO = b"STOP"
+
+    if MESSAGE is not None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(MESSAGE, (UDP_IP, UDP_PORT2))
+
+    if TURBO is not None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(TURBO, (UDP_IP, UDP_PORT1))
 
 def select_game_mode():
     screen = pygame.display.set_mode((850, 550))
@@ -62,6 +152,7 @@ def select_game_mode():
                     selected = (selected + 1) % len(modes)
             elif event.type == pygame.JOYBUTTONDOWN:
                 if event.button == 0:
+                    print(modes[selected])
                     return modes[selected]
 
 def camrunner(screen, mode):
@@ -170,7 +261,8 @@ def camrunner(screen, mode):
                 screen.blit(frame_surface, (0, 0))
                 pygame.display.update()
     finally:
-        pygame.quit()
+        # Don't quit the game if the user loses... maybe freeze the feed?
+        print("GAME OVER")
 
 def overcurrent():
     UDP_PORT_OC = 5007
@@ -181,89 +273,20 @@ def overcurrent():
         data, addr = sock.recvfrom(1024)
         if data.strip() == b"OC":
             print("OVERCURRENT")
-
-def handle_control():
-    global last_action
-    lt_value = j.get_axis(4)
-    rt_value = j.get_axis(5)
-    ls_value = j.get_axis(0)
-
-    action = ""
-    if rt_value > 0.5 and ls_value < -0.5:
-        action = "FLEFT"
-    elif rt_value > 0.5 and ls_value > 0.5:
-        action = "FRIGHT"
-    elif lt_value > 0.5 and ls_value < -0.5:
-        action = "BLEFT"
-    elif lt_value > 0.5 and ls_value > 0.5:
-        action = "BRIGHT"
-    elif rt_value > 0.5:
-        action = "FORWARD"
-    elif lt_value > 0.5:
-        action = "BACK"
-    elif ls_value < -0.5:
-        action = "LEFT"
-    elif ls_value > 0.5:
-        action = "RIGHT"
-    else:
-        action = "HALT"
-
-    if last_action != action:
-        print(action)
-        last_action = action
-        if action:
-            MESSAGE = action.encode()
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(MESSAGE, (UDP_IP, UDP_PORT1))
-
-def handle_buzzer(event):
-    MESSAGE = None
-    TURBO = None
-    if event.type == pygame.JOYBUTTONDOWN:
-        if j.get_button(0):
-            print("A")
-            TURBO = b"A"
-        if j.get_button(1):
-            print("B")
-            MESSAGE = b"B"
-        if j.get_button(2):
-            print("X")
-            MESSAGE = b"X"
-        if j.get_button(3):
-            print("Y")
-            MESSAGE = b"Tetris"
-        if j.get_button(4) or j.get_button(5):
-            print("Bumper")
-            MESSAGE = b"Bumper"
-        if (j.get_button(4) or j.get_button(5)) and j.get_button(1):
-            print("Blink")
-            MESSAGE = b"BLight"
-        if j.get_button(8):
-            print("Tetris")
-            MESSAGE = b"Tetris"
-    if event.type == pygame.JOYBUTTONUP:
-        print("STOP")
-        MESSAGE = b"STOP"
-        TURBO = b"STOP"
-
-    if MESSAGE is not None:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(MESSAGE, (UDP_IP, UDP_PORT2))
-
-    if TURBO is not None:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(TURBO, (UDP_IP, UDP_PORT1))
-
+    
 if __name__ == "__main__":
     print("Starting main loop...")
+    # Set up a larger display for video + control
     screen = pygame.display.set_mode((850, 550))
     pygame.display.set_caption("RC Car Game")
 
     game_mode = select_game_mode()
 
+    # Start camera thread
     cam_thread = threading.Thread(target=camrunner, args=(screen, game_mode), daemon=True)
     cam_thread.start()
 
+    # Start overcurrent detection thread
     oc_thread = threading.Thread(target=overcurrent, daemon=True)
     oc_thread.start()
 
@@ -274,8 +297,9 @@ if __name__ == "__main__":
                     pygame.quit()
                     sys.exit()
                 handle_buzzer(event)
+                power()
             handle_control()
-            time.sleep(0.01)
+            time.sleep(0.01)  # Small delay to avoid high CPU usage
     except KeyboardInterrupt:
         print("Shutdown requested, stopping...")
     print("All tasks completed.")
