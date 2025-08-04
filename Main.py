@@ -26,8 +26,8 @@ sock_control.bind((UDP_IP, 5005))
 sock_honker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock_honker.bind((UDP_IP, 5006))
 
-UDP_OC = "172.20.10.3"
-UDP_PORT = 5007
+UDP_OC = "172.20.10.3" # IP of laptop
+UDP_PORT = 5007        # Port overcurrent
 ################################################################3
 # Camera Streaming Setup
 app = Flask(__name__)
