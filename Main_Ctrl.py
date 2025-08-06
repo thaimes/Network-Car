@@ -1,5 +1,4 @@
 # Main code for controlling RC car
-# All controls are mapped for an XBox One controller, adjustments must be made if changed
 
 import cv2.aruco as aruco
 import numpy as np
@@ -12,11 +11,13 @@ import time
 import sys
 import cv2
 
+winner = False
+loser = False
 
 UDP_IP = "172.20.10.7" # IPv4 for Rpi 5
-UDP_PORT1 = 5005 # Port control
-UDP_PORT2 = 5006 # Port miscellaneous
-UDP_PORT3 = 5008 # Port power
+UDP_PORT1 = 5005       # Port control
+UDP_PORT2 = 5006       # Port misc
+UDP_PORT3 = 5008       # Port power
 
 print("UDP target IP: %s" % UDP_IP)
 print("UDP target port: %s" % UDP_PORT1)
@@ -34,6 +35,7 @@ if pygame.joystick.get_count() == 0:
 j = pygame.joystick.Joystick(0)
 j.init()
 print("Joystick name:", j.get_name())
+
 
 last_action = None  # Track last printed action
 
@@ -55,24 +57,27 @@ def handle_control():
     ls_value = j.get_axis(0)
 
     action = ""
-    if rt_value > 0.5 and ls_value < -0.5:
-        action = "FLEFT"
-    elif rt_value > 0.5 and ls_value > 0.5:
-        action = "FRIGHT"
-    elif lt_value > 0.5 and ls_value < -0.5:
-        action = "BLEFT"
-    elif lt_value > 0.5 and ls_value > 0.5:
-        action = "BRIGHT"
-    elif rt_value > 0.5:
-        action = "FORWARD"
-    elif lt_value > 0.5:
-        action = "BACK"
-    elif ls_value < -0.5:
-        action = "LEFT"
-    elif ls_value > 0.5:
-        action = "RIGHT"
-    else:
+    if end_game:
         action = "HALT"
+    else:
+        if rt_value > 0.5 and ls_value < -0.5:
+            action = "FLEFT"
+        elif rt_value > 0.5 and ls_value > 0.5:
+            action = "FRIGHT"
+        elif lt_value > 0.5 and ls_value < -0.5:
+            action = "BLEFT"
+        elif lt_value > 0.5 and ls_value > 0.5:
+            action = "BRIGHT"
+        elif rt_value > 0.5:
+            action = "FORWARD"
+        elif lt_value > 0.5:
+            action = "BACK"
+        elif ls_value < -0.5:
+            action = "LEFT"
+        elif ls_value > 0.5:
+            action = "RIGHT"
+        else:
+            action = "HALT"
 
     if last_action != action:
         print(action)
@@ -125,37 +130,64 @@ def handle_buzzer(event):
 
 def select_game_mode():
     screen = pygame.display.set_mode((850, 550))
-    font = pygame.font.SysFont("Consolas", 40)
     modes = ["Easy", "Medium", "Hard", "Free Drive"]
     selected = 0
 
     while True:
         screen.fill((0, 0, 0))
-        title = font.render("Select Game Mode", True, (255, 255, 255))
-        screen.blit(title, (250, 50))
 
-        for i, mode in enumerate(modes):
-            color = (0, 255, 0) if i == selected else (255, 255, 255)
-            text = font.render(mode, True, color)
-            screen.blit(text, (300, 150 + i * 60))
+        if not winner and not loser:
+            font = pygame.font.SysFont("Consolas", 40)
+            title = font.render("Select Game Mode", True, (255, 255, 255))
+            screen.blit(title, (250, 50))
+
+            for i, mode in enumerate(modes):
+                color = (0, 255, 0) if i == selected else (255, 255, 255)
+                text = font.render(mode, True, color)
+                screen.blit(text, (300, 150 + i * 60))
+
+            pygame.display.update()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.JOYHATMOTION:
+                    if event.value[1] == 1:
+                        selected = (selected - 1) % len(modes)
+                    elif event.value[1] == -1:
+                        selected = (selected + 1) % len(modes)
+                elif event.type == pygame.JOYBUTTONDOWN:
+                    if event.button == 0:
+                        print(modes[selected])
+                        return modes[selected]
+        elif winner:
+            screen.fill((0, 0, 0))
+            font = pygame.font.SysFont("Consolas", 80)
+            won = font.render("WINNER!!!", True, (0, 255, 0))
+            screen.blit(won, (250, 225))
+
+        elif loser:
+            screen.fill((0, 0, 0))
+            font = pygame.font.SysFont("Consolas", 80)
+            wfont = pygame.font.SysFont("Consolas", 10)
+            lost = font.render("LOSER", True, (255, 0, 0))
+            womp = wfont.render("womp womp :(", True, (255, 255, 255))
+            screen.blit(lost, (300, 225))
+            screen.blit(womp, (375, 300))
 
         pygame.display.update()
+                
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.JOYHATMOTION:
-                if event.value[1] == 1:
-                    selected = (selected - 1) % len(modes)
-                elif event.value[1] == -1:
-                    selected = (selected + 1) % len(modes)
-            elif event.type == pygame.JOYBUTTONDOWN:
-                if event.button == 0:
-                    print(modes[selected])
-                    return modes[selected]
 
+        
 def camrunner(screen, mode):
+    global end_game, game_restart, winner, loser
+    end_game = False
+    game_restart = False
+    winner = False
+    loser = False
+
     if mode == "Easy":
         START_TIME = 5 * 60
         COIN_MODE = "gain"
@@ -172,7 +204,6 @@ def camrunner(screen, mode):
     time_remaining = START_TIME
     last_coin_time = 0
     current_lap = 0
-    final_reached = False
     start_time = time.time()
 
     aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
@@ -187,7 +218,7 @@ def camrunner(screen, mode):
 
     try:
         for chunk in stream.iter_content(chunk_size=1024):
-            if not running or final_reached:
+            if not running:
                 break
 
             for event in pygame.event.get():
@@ -213,23 +244,35 @@ def camrunner(screen, mode):
 
                 if time_remaining <= 0 and mode != "Free Drive":
                     print("Time's up!")
+                    end_game = True
+                    game_restart = True
+                    winner = False
+                    loser = True
+                    time.sleep(2)
+                    loser = False
                     running = False
 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 corners, ids, _ = detector.detectMarkers(gray)
-
+                
                 if ids is not None:
                     for marker_id in ids.flatten():
-                        if marker_id == 0 and current_lap < 1:
+                        if marker_id == 2 and current_lap < 1:
                             current_lap = 1
                             print("Lap 1 reached!")
                         elif marker_id == 1 and current_lap < 2:
                             current_lap = 2
                             print("Lap 2 reached!")
-                        elif marker_id == 2 and current_lap == 2:
-                            print("Final reached! Game complete!")
-                            final_reached = True
-                            break
+                        elif marker_id == 0 and current_lap == 2 and mode != "Free Drive":
+                            print("ALl Laps Completed!")
+                            end_game = True
+                            game_restart = True
+                            loser = False
+                            winner = True
+                            time.sleep(2)
+                            winner = False
+                            running = False
+                            
                         elif marker_id == 3 and mode != "Free Drive":
                             now = time.time()
                             if now - last_coin_time > 3:
@@ -262,16 +305,18 @@ def camrunner(screen, mode):
                 pygame.display.update()
     finally:
         # Don't quit the game if the user loses... maybe freeze the feed?
+        end_game = True
         print("GAME OVER")
 
 def overcurrent():
     UDP_PORT_OC = 5007
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", UDP_PORT_OC))
+    UDP_OC = "0.0.0.0"
+    sock_oc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock_oc.bind((UDP_OC, UDP_PORT_OC))
     print(f"Overcurrent detection listening on UDP port {UDP_PORT_OC}")
     while True:
-        data, addr = sock.recvfrom(1024)
-        if data.strip() == b"OC":
+        data, addr = sock_oc.recvfrom(1024)
+        if data == b"OC":
             print("OVERCURRENT")
     
 if __name__ == "__main__":
@@ -291,7 +336,7 @@ if __name__ == "__main__":
     oc_thread.start()
 
     try:
-        while True:
+        while True:    
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
@@ -300,6 +345,12 @@ if __name__ == "__main__":
                 power()
             handle_control()
             time.sleep(0.01)  # Small delay to avoid high CPU usage
+
+            if game_restart:
+                game_restart = False
+                game_mode = select_game_mode()
+                cam_thread = threading.Thread(target=camrunner, args=(screen, game_mode), daemon=True)
+                cam_thread.start()
     except KeyboardInterrupt:
         print("Shutdown requested, stopping...")
     print("All tasks completed.")
